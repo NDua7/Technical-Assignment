@@ -59,27 +59,63 @@ def norm_product(s):
   s=clean_text(s)
   if not s:
     return ""
-  # collapse common vitamin D variants
-  s=re.sub(r"\bVITAMIN\s*D\s*3\b","VITAMIN D",s)
-  s=re.sub(r"\bVIT\s*D\s*3\b","VITAMIN D",s)
+
+  # remove super common noise phrases
+  s=re.sub(r"\bNO\s+UPC\b","",s)
+  s=re.sub(r"\bUPC\b","",s)
+
+  # remove dosage patterns like "500 MG", "0.5 MG", "1000IU", etc.
+  s=re.sub(r"\b\d+(\.\d+)?\s*(MG|MCG|G|GRAM|GRAMS|ML|L|IU|OZ|LB|CFU)\b","",s)
+  s=re.sub(r"\b\d+(\.\d+)?\b","",s)
+
+  # remove packaging/form words (you already have FORM/UNITS)
   parts=[]
   for w in s.split():
     if w in STOP or w in FORM or w in UNITS:
       continue
-    if re.fullmatch(r"\d+(\.\d+)?",w):
-      continue
-    if re.fullmatch(r"\d+(MG|MCG|G|IU|ML|OZ|LB)",w):
-      continue
     parts.append(w)
-  return " ".join(parts) if parts else s
+  s=" ".join(parts)
+  s=re.sub(r"\s+"," ",s).strip()
+  if not s:
+    return ""
+
+  # aggressive-ish: if product name is long, keep first 1-2 "core" tokens
+  # (this helps drop descriptors like REGULAR/RAPID/RELEASE/etc.)
+  words=s.split()
+  if len(words)>=4:
+    return " ".join(words[:2])
+  if len(words)==3:
+    return " ".join(words[:2])
+  return s
+
 ##normalize reaction and outcome wordings
-def norm_term(s):
+def norm_outcome(s):
+  # keep outcomes less aggressive so you don't accidentally merge categories
+  return clean_text(s)
+
+def norm_reaction(s):
   s=clean_text(s)
   if not s:
     return ""
-  s=re.sub(r"\bNOS\b","",s)
+
+  # remove staging / location / severity details
+  s=re.sub(r"\b(NOS|STAGE|GRADE|TYPE|SEVERE|MILD|MODERATE|ACUTE|CHRONIC)\b","",s)
+  s=re.sub(r"\b(UPPER|LOWER|LEFT|RIGHT|BILATERAL|GENERALIZED|LOCALIZED)\b","",s)
+
+  # remove roman numerals and digits (stage I/II/III, etc.)
+  s=re.sub(r"\b[IVX]{1,6}\b","",s)
+  s=re.sub(r"\b\d+\b","",s)
+
   s=re.sub(r"\s+"," ",s).strip()
+  if not s:
+    return ""
+
+  # aggressive merge: keep first 2 words if long
+  words=s.split()
+  if len(words)>=3:
+    return " ".join(words[:2])
   return s
+
 #get year from date_started, returns none if invalid
 def year_from_record(r):
   ds=r.get("date_started") or r.get("date_created") or ""
@@ -254,9 +290,9 @@ def main():
       by_year[y]+=1
 
       for o in get_outcomes(r):
-        add_count(outcomes,outcomes_rep,o,norm_term)
+        add_count(outcomes,outcomes_rep,o,norm_outcome)
       for rx in get_reactions(r):
-        add_count(reactions,reactions_rep,rx,norm_term)
+        add_count(reactions,reactions_rep,rx,norm_reaction)
 
       for name,role in prods:
         roleu=(role or "").upper()
@@ -326,7 +362,7 @@ def main():
     ax2.text(0.5,0.5,"No age data available",ha="center",va="center")
     ax2.set_axis_off()
   else:
-    bins=np.arange(0,101,5)
+    bins=np.arange(-0.5,120.5,1)
     yrs_with_ages=sorted([y for y in years if y in ages_by_year and len(ages_by_year[y])>0])
     for y in yrs_with_ages:
       ax2.hist(ages_by_year[y],bins=bins,alpha=0.18,label=str(y))
